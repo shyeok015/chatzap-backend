@@ -29,19 +29,19 @@ function login() {
 }
 
 function initSocket() {
-    console.log('Socket connected:', socket.connected);
+    console.log('सॉकेट जुड़ा:', socket.connected);
     const chatList = document.getElementById("chatList");
     socket.on('chatList', (chats) => {
-        console.log('Received chat list:', chats);
+        console.log('चैट लिस्ट मिली:', chats);
         chatList.innerHTML = "";
         chats.forEach(chat => {
             const chatItem = document.createElement("div");
             chatItem.classList.add("chat-item");
             chatItem.innerHTML = `
-                <img src="${chat.profilePic}" alt="Profile">
+                <img src="${chat.profilePic}" alt="प्रोफाइल">
                 <div>
                     <h4>${chat.name}</h4>
-                    <p>${chat.lastMessage || "No messages yet"}</p>
+                    <p>${chat.lastMessage || "अभी कोई मैसेज नहीं"}</p>
                 </div>
             `;
             chatItem.addEventListener("click", () => {
@@ -62,6 +62,7 @@ function initSocket() {
     }
 
     socket.on('chatMessages', ({ chatId, messages }) => {
+        console.log('चैट मैसेज मिले:', messages); // डिबगिंग
         if (chatId === currentChatId) {
             messagesDiv.innerHTML = "";
             messages.forEach(msg => {
@@ -72,6 +73,7 @@ function initSocket() {
     });
 
     function displayMessage(msg) {
+        console.log('मैसेज दिखा रहे हैं:', msg); // डिबगिंग
         const message = document.createElement("div");
         message.classList.add("message", msg.sender === userId ? "sent" : "received");
 
@@ -84,27 +86,61 @@ function initSocket() {
 
         // फोटो या वीडियो दिखाएं
         if (msg.media) {
-            console.log('Media URL:', msg.media); // डिबगिंग के लिए
-            if (msg.media.includes('image')) {
-                const img = document.createElement("img");
+            console.log('मीडिया URL:', msg.media); // डिबगिंग
+            // फाइल एक्सटेंशन चेक करें
+            const fileExtension = msg.media.split('.').pop().toLowerCase();
+            const imageExtensions = ['jpg', 'jpeg', 'png', 'gif'];
+            const videoExtensions = ['mp4', 'webm', 'ogg'];
+
+            if (imageExtensions.includes(fileExtension)) {
+                console.log('यह एक इमेज है, लोड कर रहे हैं...'); // डिबगिंग
+                const img = new Image(); // नया Image ऑब्जेक्ट बनाएं
                 img.src = msg.media;
                 img.classList.add("media");
-                img.style.maxWidth = "200px"; // साइज़ सेट करें
+                img.style.maxWidth = "200px";
                 img.style.maxHeight = "200px";
-                img.onerror = () => console.log('Image failed to load:', msg.media); // अगर फोटो लोड न हो
-                message.appendChild(img);
-            } else if (msg.media.includes('video')) {
+
+                // इमेज लोड होने पर
+                img.onload = () => {
+                    console.log('फोटो लोड हो गई:', msg.media);
+                    message.appendChild(img);
+                };
+
+                // इमेज लोड में एरर होने पर
+                img.onerror = () => {
+                    console.error('फोटो लोड नहीं हुई:', msg.media);
+                    const errorText = document.createElement("div");
+                    errorText.textContent = "फोटो लोड करने में असफल";
+                    message.appendChild(errorText);
+                };
+            } else if (videoExtensions.includes(fileExtension)) {
+                console.log('यह एक वीडियो है, लोड कर रहे हैं...'); // डिबगिंग
                 const video = document.createElement("video");
                 video.src = msg.media;
                 video.controls = true;
                 video.classList.add("media");
                 video.style.maxWidth = "200px";
                 video.style.maxHeight = "200px";
-                video.onerror = () => console.log('Video failed to load:', msg.media);
+                video.onerror = () => {
+                    console.error('वीडियो लोड नहीं हुआ:', msg.media);
+                    const errorText = document.createElement("div");
+                    errorText.textContent = "वीडियो लोड करने में असफल";
+                    message.appendChild(errorText);
+                };
                 message.appendChild(video);
+            } else {
+                console.log('यह न तो इमेज है और न ही वीडियो:', msg.media);
+                const errorText = document.createElement("div");
+                errorText.textContent = "अज्ञात फाइल टाइप";
+                message.appendChild(errorText);
             }
+        } else {
+            console.log('मैसेज में मीडिया नहीं है:', msg); // डिबगिंग
         }
+
+        // मैसेज को DOM में जोड़ें
         messagesDiv.appendChild(message);
+        console.log('मैसेज DOM में जोड़ा गया'); // डिबगिंग
     }
 
     const messageInput = document.getElementById("messageInput");
@@ -124,6 +160,7 @@ function initSocket() {
     fileInput.addEventListener("change", async (e) => {
         const file = e.target.files[0];
         if (file) {
+            console.log('फाइल चुनी गई:', file.name); // डिबगिंग
             const formData = new FormData();
             formData.append('file', file);
 
@@ -133,7 +170,7 @@ function initSocket() {
             });
             const result = await response.json();
             if (result.filePath) {
-                console.log('Uploaded file path:', result.filePath); // डिबगिंग के लिए
+                console.log('अपलोड की गई फाइल का पता:', result.filePath); // डिबगिंग
                 socket.emit('sendMessage', {
                     chatId: currentChatId,
                     text: "",
@@ -141,7 +178,11 @@ function initSocket() {
                     receiverId: selectedReceiver,
                     media: result.filePath
                 });
+            } else {
+                console.error('फाइल अपलोड में समस्या:', result); // डिबगिंग
             }
+        } else {
+            console.error('कोई फाइल नहीं चुनी गई'); // डिबगिंग
         }
     });
 
@@ -160,6 +201,7 @@ function initSocket() {
     }
 
     socket.on('newMessage', ({ chatId, message }) => {
+        console.log('नया मैसेज मिला:', message); // डिबगिंग
         if (chatId === currentChatId) {
             displayMessage(message);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;

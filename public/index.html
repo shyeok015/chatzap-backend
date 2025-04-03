@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-<p>हाय</p>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -12,7 +11,9 @@
     <div id="loginModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5);">
         <div style="background: white; padding: 20px; margin: 20% auto; width: 300px; text-align: center;">
             <h2>लॉगिन करें</h2>
+            <label for="username">यूज़रनेम</label>
             <input type="text" id="username" placeholder="यूज़रनेम" style="padding: 10px; margin: 10px;">
+            <label for="password">पासवर्ड</label>
             <input type="password" id="password" placeholder="पासवर्ड" style="padding: 10px; margin: 10px;">
             <button onclick="login()">लॉगिन</button>
             <p id="loginMessage"></p>
@@ -29,7 +30,8 @@
                 </div>
             </div>
             <div class="search">
-                <input type="text" placeholder="Search or start new chat">
+                <label for="searchInput" style="display: none;">Search or start new chat</label>
+                <input type="text" id="searchInput" placeholder="Search or start new chat">
             </div>
             <div class="chat-list" id="chatList"></div>
         </div>
@@ -54,6 +56,7 @@
                 <i class="fas fa-smile"></i>
                 <input type="file" id="fileInput" accept="image/*,video/*" style="display: none;">
                 <i class="fas fa-paperclip" id="fileButton"></i>
+                <label for="messageInput" style="display: none;">Type a message</label>
                 <input type="text" id="messageInput" placeholder="Type a message">
                 <i class="fas fa-paper-plane" id="sendButton"></i>
             </div>
