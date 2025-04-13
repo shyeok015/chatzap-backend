@@ -4,65 +4,216 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WhatsApp Messenger</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
 <body>
-    <div id="loginModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5);">
-        <div style="background: white; padding: 20px; margin: 20% auto; width: 300px; text-align: center;">
-            <h2>लॉगिन करें</h2>
-            <label for="username">यूज़रनेम</label>
-            <input type="text" id="username" placeholder="यूज़रनेम" style="padding: 10px; margin: 10px;">
-            <label for="password">पासवर्ड</label>
-            <input type="password" id="password" placeholder="पासवर्ड" style="padding: 10px; margin: 10px;">
-            <button onclick="login()">लॉगिन</button>
+    <!-- Modals -->
+    <div id="loginModal" class="modal" style="display: flex;">
+        <div class="modal-content">
+            <h2>Login</h2>
+            <label for="username">Username</label>
+            <input type="text" id="username" placeholder="Username">
+            <label for="password">password</label>
+            <input type="password" id="password" placeholder="Password">
+            <button onclick="login()">Login</button>
+            <button onclick="showRegister()">Register</button>
             <p id="loginMessage"></p>
+        </div>
+    </div>
+
+    <div id="registerModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Register</h2>
+            <label for="regUsername">Username</label>
+            <input type="text" id="regUsername" placeholder="New Username">
+            <label for="regPassword">Password</label>
+            <input type="password" id="regPassword" placeholder="New Password">
+            <button onclick="register()">Register</button>
+            <button onclick="showLogin()">Back to Login</button>
+            <p id="registerMessage"></p>
+        </div>
+    </div>
+
+    <div id="editProfileModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Edit Profile</h2>
+            <form id="editProfileForm">
+                <img id="profilePicDisplay" src="/placeholder.png" alt="Profile Picture" style="width: 100px; height: 100px;">
+                <label for="profilePicInput">Profile Picture</label>
+                <input type="file" id="profilePicInput" accept="image/*">
+                <label for="usernameDisplay">Username</label>
+                <input type="text" id="usernameDisplay" readonly>
+                <label for="passwordDisplay">Password</label>
+                <input type="text" id="passwordDisplay" readonly>
+                <label for="profileStatus">Profile Status</label>
+                <input type="text" id="profileStatus" placeholder="Enter profile status (e.g., Available, Busy)">
+                <label for="bio">Bio</label>
+                <textarea id="bio" placeholder="Write your bio"></textarea>
+                <button type="submit">submit</button>
+                <button type="button" id="closeEditProfileModal">Close</button>
+            </form>
+        </div>
+    </div>
+    <div id="profileViewModal" class="modal" style="display: none;">
+        <div class="modal-content" style="position: relative;">
+            <span id="backArrow" style="position: absolute; top: 10px; left: 10px; font-size: 24px; cursor: pointer; pointer-events: auto;">←</span>
+            <img id="profileViewPic" src="/placeholder.png" alt="Profile Picture" style="width: 250px; height: 250px; display: block; margin: 20px auto;">
+            <h4 id="profileViewUsername" style="text-align: center; margin-top: 10px;"></h4>
+        </div>
+    </div>
+
+    <div id="createGroupModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Create New Group</h2>
+            <form id="createGroupForm">
+                <label for="groupName">Group Name</label>
+                <input type="text" id="groupName" placeholder="Enter group name" required>
+                <label for="select-members">Select Members</label>
+                <select id="select-members" multiple required>
+                    <!-- म्यूचुअल कॉन्टैक्ट्स यहाँ डायनामिक रूप से लोड होंगे -->
+                </select>
+                <button type="submit">Create Group</button>
+                <button type="button" id="closeCreateGroupModal">Close</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="addContactModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Add New Contact</h2>
+            <form id="addContactForm">
+                <label for="contactName">Contact Username</label>
+                <input type="text" id="contactName" placeholder="Enter contact username" required>
+                <button type="submit">Add</button>
+                <button type="button" id="closeAddContactModal">Close</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="addStatusModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Add New Status</h2>
+            <form id="addStatusForm">
+                <label for="statusText">Status Text</label>
+                <input type="text" id="statusText" placeholder="Write your status">
+                <label for="statusFile">Upload Media</label>
+                <input type="file" id="statusFile" accept="image/*,video/mp4">
+                <button type="submit">Upload</button>
+                <button type="button" id="closeAddStatusModal">Close</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="createPollModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Create New Poll</h2>
+            <form id="createPollForm">
+                <label for="pollQuestion">Question</label>
+                <input type="text" id="pollQuestion" placeholder="Write poll question" required>
+                <label for="pollOptions">Options (one per line)</label>
+                <textarea id="pollOptions" placeholder="Enter options here, one per line" rows="4" required></textarea>
+                <button type="submit">Create Poll</button>
+                <button type="button" id="closeCreatePollModal">Close</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="statusViewModal" class="modal status-view-modal" style="display: none;">
+        <div class="status-view-content">
+            <div class="status-header">
+                <h3 id="statusViewUser"></h3>
+                <p id="statusViewTime"></p>
+            </div>
+            <div id="statusViewContent" class="status-view-body"></div>
+            <div class="status-controls">
+                <button id="prevStatusButton" title="Previous Status"><i class="fas fa-arrow-left"></i></button>
+                <button id="closeStatusViewModal" title="Close"><i class="fas fa-times"></i></button>
+                <button id="nextStatusButton" title="Next Status"><i class="fas fa-arrow-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="incomingCallModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Incoming Call</h2>
+            <p>Caller: <span id="callerId"></span></p>
+            <p>Call Type: <span id="callType"></span></p>
+            <button id="acceptCallButton">Accept</button>
+            <button id="declineCallButton">Decline</button>
+        </div>
+    </div>
+
+    <div id="callModal" class="modal">
+        <div class="video-container">
+            <video id="remoteVideo" autoplay playsinline></video>
+            <video id="localVideo" autoplay playsinline muted></video>
+        </div>
+        <div class="call-controls">
+            <button id="muteButton" title="Mute"></button>
+            <button id="videoButton" title="Turn Off Video"></button>
+            <button id="fullScreenButton" title="Full Screen"><i class="fas fa-expand"></i></button>
+            <button id="endCallButton" title="End Call"><i class="fas fa-phone-slash"></i></button>
+        </div>
+        <div id="callerInfo" style="position: absolute; top: 10px; left: 10px; color: white; display: none;">
+            <img id="callerDP" src="/placeholder.png" width="40" height="40" style="border-radius: 50%;">
+            <span id="callerName"></span>
         </div>
     </div>
 
     <div class="container" style="display: none;">
         <div class="sidebar">
             <div class="header">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp Logo" class="logo">
+                <img src="https://sdmntprsouthcentralus.oaiusercontent.com/files/00000000-477c-61f7-a796-87d871a7a52c/raw?se=2025-04-13T14%3A39%3A43Z&sp=r&sv=2024-08-04&sr=b&scid=fed3a74c-ea77-50a1-8a4b-4b9a2b5fc468&skoid=b53ae837-f585-4db7-b46f-2d0322fce5a9&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2025-04-13T01%3A25%3A53Z&ske=2025-04-14T01%3A25%3A53Z&sks=b&skv=2024-08-04&sig=0CKJcmSfFMvZqcOV6v0AKLs3%2B7OsnoIFUa0ELhQPsyg%3D" alt="WhatsApp Logo" class="logo">
                 <div class="icons">
-                    <i class="fas fa-comment-alt"></i>
-                    <i class="fas fa-ellipsis-v"></i>
+                    <i class="fas fa-camera" id="addStatusButton" title="Add New Status"></i>
+                    <i class="fas fa-user-plus" id="addContactButton" title="Add New Contact"></i>
+                    <i class="fas fa-users" id="createGroupButton" title="Create New Group"></i>
+                    <i class="fas fa-user-edit" id="editProfileButton" title="Edit Profile"></i>
+                    <i class="fas fa-moon" id="darkModeToggle" title="Toggle Dark Mode"></i>
                 </div>
             </div>
+            <div class="tabs">
+                <div id="chatTab" class="tab active">Chats</div>
+                <div id="statusTab" class="tab">Status</div>
+            </div>
             <div class="search">
-                <label for="searchInput" style="display: none;">Search or start new chat</label>
-                <input type="text" id="searchInput" placeholder="Search or start new chat">
+                <input type="text" id="searchInput" placeholder="Search chats..." style="width: 100%; padding: 8px; margin-bottom: 10px;">
             </div>
             <div class="chat-list" id="chatList"></div>
+            <div class="status-list" id="statusList" style="display: none;"></div>
         </div>
 
         <div class="chat-area" id="chatArea">
             <div class="chat-header">
+                <i class="fas fa-arrow-left back-arrow"></i> <!-- बैक एरो जोड़ा -->
                 <div class="chat-info">
-                    <img src="https://via.placeholder.com/40" alt="Profile" class="profile-pic">
+                  <img src="https://via.placeholder.com/40" alt="Profile" class="profile-pic">
                     <div>
                         <h3 id="chatName">Select a chat</h3>
                         <p id="chatStatus">Online</p>
+                        <p id="chatBio" class="chat-bio"></p>
                     </div>
                 </div>
                 <div class="icons">
-                    <i class="fas fa-search"></i>
-                    <i class="fas fa-paperclip"></i>
-                    <i class="fas fa-ellipsis-v"></i>
+                    <i class="fas fa-phone" id="voiceCallButton" title="Voice Call"></i>
+                    <i class="fas fa-video" id="videoCallButton" title="Video Call"></i>
+                    <i class="fas fa-ellipsis-v" id="sidebarSettingsButton" title="Settings"></i>
                 </div>
             </div>
             <div class="chat-messages" id="messages"></div>
             <div class="chat-input">
+                <i class="fas fa-paperclip" id="fileButton" title="Attach File"></i>
                 <i class="fas fa-smile"></i>
                 <input type="file" id="fileInput" accept="image/*,video/*" style="display: none;">
-                <i class="fas fa-paperclip" id="fileButton"></i>
-                <label for="messageInput" style="display: none;">Type a message</label>
                 <input type="text" id="messageInput" placeholder="Type a message">
-                <i class="fas fa-paper-plane" id="sendButton"></i>
+                <i class="fas fa-microphone" id="micButton" title="Voice Message"></i>
+                <i class="fas fa-paper-plane" id="sendButton" title="Send"></i>
             </div>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
