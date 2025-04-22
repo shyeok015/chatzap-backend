@@ -78,7 +78,7 @@ function register() {
         document.getElementById('registerMessage').textContent = 'Please enter the username and password';
         return;
     }
-    fetch('http://localhost:3000/register', {
+    fetch('https://chatzap.xyz/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -113,7 +113,7 @@ function login() {
         document.getElementById('loginMessage').textContent = 'Please enter the username and password';
         return;
     }
-    fetch('http://localhost:3000/login', {
+    fetch('https://chatzap.xyz/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -151,7 +151,7 @@ function initSocketConnection() {
         socket.disconnect(); // पुराना कनेक्शन बंद करें
     }
     try {
-        socket = io('http://localhost:3000', {
+        socket = io('https://chatzap.xyz', {
             reconnection: true,
             reconnectionAttempts: 5, // रीकनेक्शन की कोशिशें 10 से घटाकर 5
             reconnectionDelay: 2000, // अंतराल को 1 सेकंड से बढ़ाकर 2 सेकंड
@@ -379,7 +379,7 @@ function showEditGroupModal() {
         formData.append('creatorId', userId);
         if (profilePic) formData.append('profilePic', profilePic);
 
-        const response = await fetch('http://localhost:3000/updateGroup', { method: 'POST', body: formData });
+        const response = await fetch('https://chatzap.xyz/updateGroup', { method: 'POST', body: formData });
         const result = await response.json();
         if (result.success) {
             modal.remove();
@@ -447,7 +447,7 @@ function showAddGroupMemberModal() {
             return;
         }
 
-        const response = await fetch(`http://localhost:3000/getUsers?userId=${userId}`);
+        const response = await fetch(`https://chatzap.xyz/getUsers?userId=${userId}`);
         const users = await response.json();
         const member = users.find(u => u.username === memberUsername);
         if (!member) {
@@ -457,7 +457,7 @@ function showAddGroupMemberModal() {
         const memberId = member.userId;
 
         console.log('Sending addGroupMember request with:', { groupId: currentChatId, memberId, creatorId: userId });
-        const addResponse = await fetch('http://localhost:3000/addGroupMember', {
+        const addResponse = await fetch('https://chatzap.xyz/addGroupMember', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ groupId: currentChatId, memberId, creatorId: userId })
@@ -532,7 +532,7 @@ function showRemoveGroupMemberModal() {
             return;
         }
 
-        const response = await fetch(`http://localhost:3000/getUsers?userId=${userId}`);
+        const response = await fetch(`https://chatzap.xyz/getUsers?userId=${userId}`);
         const users = await response.json();
         const member = users.find(u => u.username === memberUsername);
         if (!member) {
@@ -542,7 +542,7 @@ function showRemoveGroupMemberModal() {
         const memberId = member.userId;
 
         console.log('Sending removeGroupMember request with:', { groupId: currentChatId, memberId, creatorId: userId });
-        const removeResponse = await fetch('http://localhost:3000/removeGroupMember', {
+        const removeResponse = await fetch('https://chatzap.xyz/removeGroupMember', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ groupId: currentChatId, memberId, creatorId: userId })
@@ -601,7 +601,7 @@ function initSocket() {
     }
     chatList.innerHTML = "";
     
-    fetch(`http://localhost:3000/getUsers?userId=${userId}`)
+    fetch(`https://chatzap.xyz/getUsers?userId=${userId}`)
         .then(response => {
             if (!response.ok) throw new Error('नेटवर्क रिस्पॉन्स नहीं मिला');
             return response.json();
@@ -704,7 +704,7 @@ function loadChat(chat) {
     } else if (chat.isGroup) {
         otherUserId = chat.members.find(m => m !== userId) || chat.members[0];
     }
-    fetch(`http://localhost:3000/getUsers?userId=${userId}`)
+    fetch(`https://chatzap.xyz/getUsers?userId=${userId}`)
         .then(response => {
             if (!response.ok) throw new Error('नेटवर्क रिस्पॉन्स नहीं मिला');
             return response.json();
@@ -1233,7 +1233,7 @@ if (loginForm) {
         e.preventDefault();
         const username = document.getElementById('loginUsername').value;
         const password = document.getElementById('loginPassword').value;
-        const response = await fetch('http://localhost:3000/login', {
+        const response = await fetch('https://chatzap.xyz/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
@@ -1263,7 +1263,7 @@ if (editProfileForm) {
         if (profilePic) formData.append('profilePic', profilePic);
         // पासवर्ड को formData में नहीं जोड़ा, क्योंकि यह रीड-ओनली है
 
-        const response = await fetch('http://localhost:3000/updateProfile', { method: 'POST', body: formData });
+        const response = await fetch('https://chatzap.xyz/updateProfile', { method: 'POST', body: formData });
         const result = await response.json();
         if (result.success) {
             userProfile = {
@@ -1310,7 +1310,7 @@ if (editProfileForm) {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                 const formData = new FormData();
                 formData.append('file', audioBlob, 'voice-message.webm');
-                const response = await fetch('http://localhost:3000/upload', { method: 'POST', body: formData });
+                const response = await fetch('https://chatzap.xyz/upload', { method: 'POST', body: formData });
                 const result = await response.json();
                 if (result.filePath && currentChatId) {
                     const messageId = `${currentChatId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -1340,7 +1340,7 @@ if (editProfileForm) {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                 const formData = new FormData();
                 formData.append('file', audioBlob, 'voice-message.webm');
-                const response = await fetch('http://localhost:3000/upload', { method: 'POST', body: formData });
+                const response = await fetch('https://chatzap.xyz/upload', { method: 'POST', body: formData });
                 const result = await response.json();
                 if (result.filePath && currentChatId) {
                     const messageId = `${currentChatId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -1394,7 +1394,7 @@ if (editProfileForm) {
             if (file && currentChatId) {
                 const formData = new FormData();
                 formData.append('file', file);
-                const response = await fetch('http://localhost:3000/upload', { method: 'POST', body: formData });
+                const response = await fetch('https://chatzap.xyz/upload', { method: 'POST', body: formData });
                 const result = await response.json();
                 if (result.filePath) {
                     const messageId = `${currentChatId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -1446,7 +1446,7 @@ if (addContactForm) {
         e.preventDefault();
         const contactName = document.getElementById('contactName')?.value;
         if (contactName && userId) {
-            fetch('http://localhost:3000/addContact', {
+            fetch('https://chatzap.xyz/addContact', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username: contactName, currentUserId: userId })
@@ -1460,7 +1460,7 @@ if (addContactForm) {
                     chats = []; // चैट्स ऐरे को खाली करें
                     socket.emit('chatList', { userId }); // अपनी चैट लिस्ट रिफ्रेश करें
                     // नया कॉन्टैक्ट जोड़ा गया, तो उनके लिए भी अपडेट करें
-                    fetch(`http://localhost:3000/getUsers?userId=${userId}`)
+                    fetch(`https://chatzap.xyz/getUsers?userId=${userId}`)
                         .then(res => res.json())
                         .then(users => {
                             const contact = users.find(u => u.username === contactName);
@@ -1510,7 +1510,7 @@ if (addContactForm) {
             if (statusText) formData.append('text', statusText);
             if (statusFile) formData.append('file', statusFile);
 
-            const response = await fetch('http://localhost:3000/addStatus', { method: 'POST', body: formData });
+            const response = await fetch('https://chatzap.xyz/addStatus', { method: 'POST', body: formData });
             const result = await response.json();
             if (result.success) {
                 const modal = document.getElementById('addStatusModal');
@@ -1534,7 +1534,7 @@ if (addContactForm) {
         createGroupButton.addEventListener("click", () => {
             const modal = document.getElementById('createGroupModal');
             if (modal) modal.style.display = 'flex';
-            fetch(`http://localhost:3000/getUsers?userId=${userId}`)
+            fetch(`https://chatzap.xyz/getUsers?userId=${userId}`)
                 .then(response => response.json())
                 .then(users => {
                     const selectElement = document.getElementById('select-members');
@@ -1564,7 +1564,7 @@ if (addContactForm) {
             const members = Array.from(selectElement.selectedOptions).map(option => option.value);
 
             if (groupName && members.length > 0) {
-                fetch('http://localhost:3000/createGroup', {
+                fetch('https://chatzap.xyz/createGroup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: groupName, members, creatorId: userId })
@@ -1802,7 +1802,7 @@ function initializeCallControls(callType) {
         remoteVideo.style.display = 'none';
         localVideo.style.display = 'none';
         const otherUser = chats.find(c => c.participants && c.participants.includes(selectedReceiver))?.participants.find(p => p !== userId);
-        fetch(`http://localhost:3000/getUsers?userId=${userId}`)
+        fetch(`https://chatzap.xyz/getUsers?userId=${userId}`)
             .then(response => response.json())
             .then(users => {
                 const user = users.find(u => u.userId === otherUser);
@@ -1933,7 +1933,7 @@ function initializeCallControls(callType) {
         const callerIdElement = document.getElementById('callerId');
         const callTypeElement = document.getElementById('callType');
         if (incomingCallModal && callerIdElement && callTypeElement) {
-            fetch(`http://localhost:3000/getUsers?userId=${userId}`)
+            fetch(`https://chatzap.xyz/getUsers?userId=${userId}`)
                 .then(response => response.json())
                 .then(users => {
                     const caller = users.find(u => u.userId === callerId);
@@ -2316,7 +2316,7 @@ function showContextMenu(e, chat) {
             } else if (action === 'removeContact') {
                 if (confirm('क्या आप इस कॉन्टैक्ट को हटाना चाहते हैं?')) {
                     const contactId = chat.participants.find(p => p !== userId);
-                    fetch('http://localhost:3000/removeContact', {
+                    fetch('https://chatzap.xyz/removeContact', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ userId, contactId })
@@ -2446,7 +2446,7 @@ socket.on('messageStatus', ({ messageId, status }) => {
 
 // प्रोफाइल व्यू खोलने का फंक्शन
 function openProfileView(userIdToView, isGroup) {
-    fetch(`http://localhost:3000/getProfile?userId=${userIdToView}`, {
+    fetch(`https://chatzap.xyz/getProfile?userId=${userIdToView}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
     })
@@ -2518,7 +2518,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => {
                     const chat = chats.find(c => c.id === currentChatId);
                     if (chat && !chat.isGroup) {
-                        fetch(`http://localhost:3000/getUsers?userId=${userId}`)
+                        fetch(`https://chatzap.xyz/getUsers?userId=${userId}`)
                             .then(response => response.json())
                             .then(users => {
                                 const otherUser = users.find(u => u.userId === chat.participants.find(p => p !== userId));

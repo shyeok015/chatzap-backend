@@ -5,19 +5,46 @@ const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
 const cors = require('cors');
+const { MongoClient, ObjectId } = require('mongodb');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
-        origin: "http://localhost:3000",
+        origin: "https://chatzap.xyz",
         methods: ["GET", "POST", "OPTIONS"],
         credentials: true
     }
 });
 
+const BASE_URL = "https://chatzap.xyz";
+
+// MongoDB Atlas कनेक्शन
+const mongoUri = "mongodb+srv://ayush:ayushAS123@cluster0.tl2q5se.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+const client = new MongoClient(mongoUri);
+
+let db, usersCollection, chatsCollection, messagesCollection, statusesCollection, pollsCollection;
+
+async function connectToMongoDB() {
+    try {
+        await client.connect();
+        db = client.db('chatApp');
+        usersCollection = db.collection('users');
+        chatsCollection = db.collection('chats');
+        messagesCollection = db.collection('messages');
+        statusesCollection = db.collection('statuses');
+        pollsCollection = db.collection('polls');
+        console.log('MongoDB Atlas से कनेक्ट हो गया');
+    } catch (error) {
+        console.error('MongoDB कनेक्शन में त्रुटि:', error);
+        process.exit(1);
+    }
+}
+
+connectToMongoDB();
+
 app.use(cors({
-    origin: 'http://localhost:3000',
+    origin: 'https://chatzap.xyz',
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type'],
     credentials: true
@@ -30,71 +57,10 @@ app.use(express.json());
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-const usersDb = new Map();
-let userCounter = 0;
-const chats = [];
-const messages = {};
-const statuses = [];
-const polls = {};
-const processedMessages = new Set();
 const connectedUsers = new Map();
 const disappearingMessages = {};
 
-// मेमोरी लीक रोकने के लिए processedMessages को समय-समय पर साफ करें
-setInterval(() => {
-    if (processedMessages.size > 10000) { // 10,000 मैसेज ID से ज्यादा होने पर साफ करें
-        processedMessages.clear();
-        console.log('processedMessages साफ किया गया');
-    }
-}, 60 * 60 * 1000); // हर घंटे चेक करें
-
-console.log('Initial usersDb:', Array.from(usersDb.values()));
-console.log('Initial chats:', chats);
-
-app.post('/register', (req, res) => {
-    try {
-        const { username, password } = req.body;
-        if (!username || !password) {
-            return res.status(400).json({ success: false, message: 'यूज़रनेम और पासवर्ड ज़रूरी हैं' });
-        }
-        if (usersDb.has(username)) {
-            return res.status(400).json({ success: false, message: 'यूज़रनेम पहले से मौजूद है' });
-        }
-        userCounter++;
-        const userId = `user${userCounter}`;
-        const newUser = { 
-            password, 
-            userId, 
-            profilePic: "/placeholder.png", 
-            status: "Available", 
-            bio: "Hi! I am using ChatZap",
-            username,
-            contacts: []
-        };
-        usersDb.set(username, newUser);
-        console.log('Registered user:', newUser);
-        res.json({ success: true, userId, profile: { profilePic: newUser.profilePic, status: newUser.status, bio: newUser.bio, username: newUser.username } });
-    } catch (error) {
-        console.error('Error in register:', error);
-        res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
-    }
-});
-
-app.post('/login', (req, res) => {
-    try {
-        const { username, password } = req.body;
-        const user = usersDb.get(username);
-        if (user && user.password === password) {
-            res.json({ success: true, userId: user.userId, profile: { profilePic: user.profilePic, status: user.status, bio: user.bio, username: user.username, password: user.password } });
-        } else {
-            res.status(401).json({ success: false, message: 'गलत यूज़रनेम या पासवर्ड' });
-        }
-    } catch (error) {
-        console.error('Error in login:', error);
-        res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
-    }
-});
-
+// फाइल अपलोड के लिए सेटअप
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const dir = './uploads';
@@ -105,51 +71,137 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-app.post('/upload', upload.single('file'), (req, res) => {
+// रजिस्टर एंडपॉइंट
+app.post('/register', async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ error: 'कोई फाइल अपलोड नहीं हुई' });
-        const filePath = `http://localhost:3000/uploads/${req.file.filename}`;
-        res.json({ filePath });
+        const { username, password } = req.body;
+        if (!username || !password) {
+            return res.status(400).json({ success: false, message: 'यूज़रनेम और पासवर्ड ज़रूरी हैं' });
+        }
+
+        const existingUser = await usersCollection.findOne({ username });
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: 'यूज़रनेम पहले से मौजूद है' });
+        }
+
+        const newUser = { 
+            username,
+            password, 
+            profilePic: "/placeholder.png", 
+            status: "Available", 
+            bio: "Hi! I am using ChatZap",
+            contacts: [],
+            createdAt: new Date()
+        };
+
+        const result = await usersCollection.insertOne(newUser);
+        const userId = result.insertedId.toString();
+
+        console.log('नया यूज़र रजिस्टर्ड:', { username, userId });
+        res.json({ 
+            success: true, 
+            userId, 
+            profile: { 
+                profilePic: newUser.profilePic, 
+                status: newUser.status, 
+                bio: newUser.bio, 
+                username: newUser.username 
+            } 
+        });
     } catch (error) {
-        console.error('Error in upload:', error);
+        console.error('रजिस्टर में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.post('/updateProfile', upload.single('profilePic'), (req, res) => {
+// लॉगिन एंडपॉइंट
+app.post('/login', async (req, res) => {
     try {
-        const { userId, status, bio, password } = req.body;
-        const user = Array.from(usersDb.values()).find(u => u.userId === userId);
-        if (user) {
-            if (req.file) user.profilePic = `http://localhost:3000/uploads/${req.file.filename}`;
-            if (status) user.status = status;
-            if (bio) user.bio = bio;
-            if (password) user.password = password;
-            io.emit('profileUpdated', { userId, profilePic: user.profilePic, status: user.status, bio: user.bio, username: user.username });
+        const { username, password } = req.body;
+        const user = await usersCollection.findOne({ username });
+
+        if (user && user.password === password) {
             res.json({ 
                 success: true, 
+                userId: user._id.toString(), 
                 profile: { 
                     profilePic: user.profilePic, 
                     status: user.status, 
                     bio: user.bio, 
-                    username: user.username, 
+                    username: user.username,
                     password: user.password 
                 } 
             });
         } else {
-            res.status(404).json({ success: false, message: 'यूज़र नहीं मिला' });
+            res.status(401).json({ success: false, message: 'गलत यूज़रनेम या पासवर्ड' });
         }
     } catch (error) {
-        console.error('Error in updateProfile:', error);
+        console.error('लॉगिन में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.post('/addContact', (req, res) => {
+// फाइल अपलोड एंडपॉइंट
+app.post('/upload', upload.single('file'), (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'कोई फाइल अपलोड नहीं हुई' });
+        const filePath = `https://chatzap.xyz/uploads/${req.file.filename}`;
+        res.json({ filePath });
+    } catch (error) {
+        console.error('अपलोड में त्रुटि:', error);
+        res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
+    }
+});
+
+// प्रोफाइल अपडेट एंडपॉइंट
+app.post('/updateProfile', upload.single('profilePic'), async (req, res) => {
+    try {
+        const { userId, status, bio, password } = req.body;
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'यूज़र नहीं मिला' });
+        }
+
+        const updates = {};
+        if (req.file) updates.profilePic = `https://chatzap.xyz/uploads/${req.file.filename}`;
+        if (status) updates.status = status;
+        if (bio) updates.bio = bio;
+        if (password) updates.password = password;
+
+        await usersCollection.updateOne({ _id: new ObjectId(userId) }, { $set: updates });
+        const updatedUser = await usersCollection.findOne({ _id: new ObjectId(userId) });
+
+        io.emit('profileUpdated', { 
+            userId, 
+            profilePic: updatedUser.profilePic, 
+            status: updatedUser.status, 
+            bio: updatedUser.bio, 
+            username: updatedUser.username 
+        });
+
+        res.json({ 
+            success: true, 
+            profile: { 
+                profilePic: updatedUser.profilePic, 
+                status: updatedUser.status, 
+                bio: updatedUser.bio, 
+                username: updatedUser.username, 
+                password: updatedUser.password 
+            } 
+        });
+    } catch (error) {
+        console.error('प्रोफाइल अपडेट में त्रुटि:', error);
+        res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
+    }
+});
+
+// कॉन्टैक्ट जोड़ने का एंडपॉइंट
+app.post('/addContact', async (req, res) => {
     try {
         const { username, currentUserId } = req.body;
-        const currentUser = Array.from(usersDb.values()).find(u => u.userId === currentUserId);
-        const contact = usersDb.get(username);
+        const currentUser = await usersCollection.findOne({ _id: new ObjectId(currentUserId) });
+        const contact = await usersCollection.findOne({ username });
 
         if (!username || !contact || !currentUser) {
             return res.status(400).json({ success: false, message: 'यूज़र रजिस्टर्ड नहीं है या कॉन्टैक्ट यूज़रनेम अमान्य है' });
@@ -158,91 +210,79 @@ app.post('/addContact', (req, res) => {
             return res.status(400).json({ success: false, message: 'आप स्वयं को कॉन्टैक्ट के रूप में नहीं जोड़ सकते' });
         }
 
-        if (!currentUser.contacts.includes(contact.userId)) {
-            currentUser.contacts.push(contact.userId);
-        }
-        const mutualContact = Array.from(usersDb.values()).find(u => u.userId === contact.userId);
-        if (mutualContact && !mutualContact.contacts.includes(currentUserId)) {
-            mutualContact.contacts.push(currentUserId);
+        const contactId = contact._id.toString();
+
+        if (!currentUser.contacts.includes(contactId)) {
+            await usersCollection.updateOne(
+                { _id: new ObjectId(currentUserId) },
+                { $addToSet: { contacts: contactId } }
+            );
         }
 
-        let existingChat = chats.find(chat => 
-            chat.participants && 
-            chat.participants.length === 2 && 
-            chat.participants.includes(currentUserId) && 
-            chat.participants.includes(contact.userId)
-        );
+        if (!contact.contacts.includes(currentUserId)) {
+            await usersCollection.updateOne(
+                { _id: contact._id },
+                { $addToSet: { contacts: currentUserId } }
+            );
+        }
 
-        console.log('Before addContact - Existing chats:', JSON.stringify(chats, null, 2));
+        let existingChat = await chatsCollection.findOne({
+            isGroup: false,
+            participants: { $all: [currentUserId, contactId], $size: 2 }
+        });
+
         if (!existingChat) {
-            for (let i = chats.length - 1; i >= 0; i--) {
-                if (chats[i].participants && 
-                    chats[i].participants.length === 2 && 
-                    chats[i].participants.includes(currentUserId) && 
-                    chats[i].participants.includes(contact.userId)) {
-                    const chatId = chats[i].id;
-                    chats.splice(i, 1);
-                    if (messages[chatId]) {
-                        delete messages[chatId];
-                    }
-                }
-            }
-            const newChat = { 
-                id: chats.length + 1, 
+            const newChat = {
                 name: contact.username,
-                profilePic: contact.profilePic, 
-                userId: contact.userId, 
-                isGroup: false, 
+                profilePic: contact.profilePic,
+                userId: contactId,
+                isGroup: false,
                 lastMessage: "",
-                participants: [currentUserId, contact.userId]
+                participants: [currentUserId, contactId],
+                createdAt: new Date()
             };
-            chats.push(newChat);
-            existingChat = newChat;
-            console.log('After addContact - New chat added:', JSON.stringify(newChat, null, 2));
+
+            const result = await chatsCollection.insertOne(newChat);
+            existingChat = { ...newChat, id: result.insertedId.toString() };
         }
 
-        const currentUserChats = chats
-            .filter(c => (c.participants && c.participants.includes(currentUserId)) || (c.isGroup && c.members && c.members.includes(currentUserId)))
-            .map(c => ({ ...c, messages: messages[c.id] || [] }));
-
-        const contactUserChats = chats
-            .filter(c => (c.participants && c.participants.includes(contact.userId)) || (c.isGroup && c.members && c.members.includes(contact.userId)))
-            .map(c => ({ ...c, messages: messages[c.id] || [] }));
+        const currentUserChats = await getChatsForUser(currentUserId);
+        const contactUserChats = await getChatsForUser(contactId);
 
         const currentUserSocket = connectedUsers.get(currentUserId);
         if (currentUserSocket) {
             io.to(currentUserSocket).emit('chatList', currentUserChats);
-        } else {
-            console.warn('No socket found for currentUserId:', currentUserId);
         }
 
-        const contactSocket = connectedUsers.get(contact.userId);
+        const contactSocket = connectedUsers.get(contactId);
         if (contactSocket) {
             io.to(contactSocket).emit('chatList', contactUserChats);
-        } else {
-            console.warn('No socket found for contact.userId:', contact.userId);
         }
 
         res.json({ success: true, contact: existingChat });
     } catch (error) {
-        console.error('Error in addContact:', error);
+        console.error('कॉन्टैक्ट जोड़ने में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें', error: error.message });
     }
 });
 
-app.post('/createGroup', (req, res) => {
+// ग्रुप बनाने का एंडपॉइंट
+app.post('/createGroup', async (req, res) => {
     try {
         const { name, members, creatorId } = req.body;
-        const creator = Array.from(usersDb.values()).find(u => u.userId === creatorId);
+        const creator = await usersCollection.findOne({ _id: new ObjectId(creatorId) });
 
         if (!name || !members || members.length === 0 || !creatorId || !creator) {
             return res.status(400).json({ success: false, message: 'ग्रुप का नाम, सदस्य और क्रिएटर ID ज़रूरी हैं' });
         }
 
-        const validMembers = members.filter(memberId => {
-            const member = Array.from(usersDb.values()).find(u => u.userId === memberId);
-            return member && (creator.contacts.includes(memberId) || member.contacts.includes(creatorId));
-        });
+        const validMembers = [];
+        for (const memberId of members) {
+            const member = await usersCollection.findOne({ _id: new ObjectId(memberId) });
+            if (member && (creator.contacts.includes(memberId) || member.contacts.includes(creatorId))) {
+                validMembers.push(memberId);
+            }
+        }
 
         if (validMembers.length === 0) {
             return res.status(400).json({ success: false, message: 'कोई वैध सदस्य नहीं मिला जो आपके कॉन्टैक्ट में हो या जिसके कॉन्टैक्ट में आप हों' });
@@ -250,58 +290,69 @@ app.post('/createGroup', (req, res) => {
 
         if (!validMembers.includes(creatorId)) validMembers.push(creatorId);
 
-        const newGroup = { 
-            id: chats.length + 1, 
-            name, 
-            profilePic: "/placeholder.png", 
-            members: validMembers, 
-            isGroup: true, 
-            lastMessage: "", 
-            creatorId
+        const newGroup = {
+            name,
+            profilePic: "/placeholder.png",
+            members: validMembers,
+            isGroup: true,
+            lastMessage: "",
+            creatorId,
+            createdAt: new Date()
         };
-        chats.push(newGroup);
-        console.log('Created group:', newGroup);
-        const updatedChats = chats.map(c => ({ ...c, messages: messages[c.id] || [] }));
+
+        const result = await chatsCollection.insertOne(newGroup);
+        const groupId = result.insertedId.toString();
+
+        const updatedChats = await getChatsForUser(creatorId);
         io.emit('chatList', updatedChats);
-        res.json({ success: true, group: newGroup });
+
+        res.json({ success: true, group: { ...newGroup, id: groupId } });
     } catch (error) {
-        console.error('Error in createGroup:', error);
+        console.error('ग्रुप बनाने में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.post('/updateGroup', upload.single('profilePic'), (req, res) => {
+// ग्रुप अपडेट एंडपॉइंट
+app.post('/updateGroup', upload.single('profilePic'), async (req, res) => {
     try {
         const { groupId, name, creatorId } = req.body;
-        const group = chats.find(c => c.id === parseInt(groupId) && c.isGroup && c.creatorId === creatorId);
+        const group = await chatsCollection.findOne({ 
+            _id: new ObjectId(groupId), 
+            isGroup: true, 
+            creatorId 
+        });
 
         if (!group) {
             return res.status(403).json({ success: false, message: 'ग्रुप नहीं मिला या आप क्रिएटर नहीं हैं' });
         }
 
-        if (name) group.name = name;
-        if (req.file) group.profilePic = `http://localhost:3000/uploads/${req.file.filename}`;
+        const updates = {};
+        if (name) updates.name = name;
+        if (req.file) updates.profilePic = `https://chatzap.xyz/uploads/${req.file.filename}`;
 
-        const updatedChats = chats.map(c => ({ ...c, messages: messages[c.id] || [] }));
+        await chatsCollection.updateOne(
+            { _id: new ObjectId(groupId) },
+            { $set: updates }
+        );
+
+        const updatedChats = await getChatsForUser(creatorId);
         io.emit('chatList', updatedChats);
-        res.json({ success: true, group });
+
+        res.json({ success: true, group: { ...group, ...updates, id: groupId } });
     } catch (error) {
-        console.error('Error in updateGroup:', error);
+        console.error('ग्रुप अपडेट में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.post('/addGroupMember', (req, res) => {
+// ग्रुप में सदस्य जोड़ने का एंडपॉइंट
+app.post('/addGroupMember', async (req, res) => {
     try {
-        console.log('addGroupMember Request Body:', req.body);
         const { groupId, memberId, creatorId } = req.body;
-        const group = chats.find(c => c.id === parseInt(groupId) && c.isGroup);
-        const creator = Array.from(usersDb.values()).find(u => u.userId === creatorId);
-        const member = Array.from(usersDb.values()).find(u => u.userId === memberId);
-
-        console.log('Group:', group, 'Creator:', creator, 'Member:', member);
-        console.log('Users DB:', Array.from(usersDb.values()));
-        console.log('Chats:', chats);
+        const group = await chatsCollection.findOne({ _id: new ObjectId(groupId), isGroup: true });
+        const creator = await usersCollection.findOne({ _id: new ObjectId(creatorId) });
+        const member = await usersCollection.findOne({ _id: new ObjectId(memberId) });
 
         if (!group) return res.status(404).json({ success: false, message: 'ग्रुप नहीं मिला' });
         if (!creator) return res.status(404).json({ success: false, message: 'क्रिएटर नहीं मिला' });
@@ -312,69 +363,75 @@ app.post('/addGroupMember', (req, res) => {
         }
 
         if (!group.members.includes(memberId)) {
-            group.members.push(memberId);
-            const updatedChats = chats.map(c => ({ ...c, messages: messages[c.id] || [] }));
+            await chatsCollection.updateOne(
+                { _id: new ObjectId(groupId) },
+                { $addToSet: { members: memberId } }
+            );
+
+            const updatedChats = await getChatsForUser(creatorId);
             io.emit('chatList', updatedChats);
-            res.json({ success: true, group });
+
+            res.json({ success: true, group: { ...group, members: [...group.members, memberId] } });
         } else {
             res.json({ success: false, message: 'सदस्य पहले से ग्रुप में है' });
         }
     } catch (error) {
-        console.error('Error in addGroupMember:', error);
+        console.error('सदस्य जोड़ने में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.post('/removeGroupMember', (req, res) => {
+// ग्रुप से सदस्य हटाने का एंडपॉइंट
+app.post('/removeGroupMember', async (req, res) => {
     try {
-        console.log('removeGroupMember Request Body:', req.body);
         const { groupId, memberId, creatorId } = req.body;
-        const group = chats.find(c => c.id === parseInt(groupId) && c.isGroup);
+        const group = await chatsCollection.findOne({ _id: new ObjectId(groupId), isGroup: true });
 
-        console.log('Group:', group);
         if (!group) return res.status(404).json({ success: false, message: 'ग्रुप नहीं मिला' });
 
-        const creator = Array.from(usersDb.values()).find(u => u.userId === creatorId);
-        console.log('Creator:', creator);
+        const creator = await usersCollection.findOne({ _id: new ObjectId(creatorId) });
         if (!creator) return res.status(404).json({ success: false, message: 'क्रिएटर नहीं मिला' });
 
-        const member = Array.from(usersDb.values()).find(u => u.userId === memberId);
-        console.log('Member:', member);
+        const member = await usersCollection.findOne({ _id: new ObjectId(memberId) });
         if (!member) return res.status(404).json({ success: false, message: 'सदस्य नहीं मिला' });
 
         if (creatorId !== group.creatorId) {
             return res.status(403).json({ success: false, message: 'केवल ग्रुप क्रिएटर ही सदस्य हटा सकता है' });
         }
 
-        const memberIndex = group.members.indexOf(memberId);
-        if (memberIndex === -1) {
+        if (!group.members.includes(memberId)) {
             return res.status(400).json({ success: false, message: 'सदस्य ग्रुप में नहीं है' });
         }
 
-        group.members.splice(memberIndex, 1);
-        const updatedChats = chats.map(c => ({ ...c, messages: messages[c.id] || [] }));
+        await chatsCollection.updateOne(
+            { _id: new ObjectId(groupId) },
+            { $pull: { members: memberId } }
+        );
+
+        const updatedChats = await getChatsForUser(creatorId);
         io.emit('chatList', updatedChats);
-        console.log('Member removed successfully, Updated Group:', group);
-        res.json({ success: true, group });
+
+        res.json({ success: true, group: { ...group, members: group.members.filter(m => m !== memberId) } });
     } catch (error) {
-        console.error('Error in removeGroupMember:', error);
+        console.error('सदस्य हटाने में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.get('/getUsers', (req, res) => {
+// यूज़र्स लिस्ट एंडपॉइंट
+app.get('/getUsers', async (req, res) => {
     try {
         const { userId } = req.query;
-        const user = Array.from(usersDb.values()).find(u => u.userId === userId);
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
 
         if (!user) return res.status(404).json({ success: false, message: 'यूज़र नहीं मिला' });
 
-        const mutualContacts = Array.from(usersDb.values()).filter(otherUser => {
-            return user.contacts.includes(otherUser.userId) || otherUser.contacts.includes(user.userId);
-        });
+        const mutualContacts = await usersCollection.find({
+            _id: { $in: user.contacts.map(id => new ObjectId(id)) }
+        }).toArray();
 
         const usersList = mutualContacts.map(user => ({
-            userId: user.userId,
+            userId: user._id.toString(),
             profilePic: user.profilePic,
             status: user.status,
             bio: user.bio,
@@ -383,53 +440,45 @@ app.get('/getUsers', (req, res) => {
 
         res.json(usersList);
     } catch (error) {
-        console.error('Error in getUsers:', error);
+        console.error('यूज़र्स लिस्ट प्राप्त करने में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.post('/removeContact', (req, res) => {
+// कॉन्टैक्ट हटाने का एंडपॉइंट
+app.post('/removeContact', async (req, res) => {
     try {
         const { userId, contactId } = req.body;
-        const currentUser = Array.from(usersDb.values()).find(u => u.userId === userId);
-        const contactUser = Array.from(usersDb.values()).find(u => u.userId === contactId);
+        const currentUser = await usersCollection.findOne({ _id: new ObjectId(userId) });
+        const contactUser = await usersCollection.findOne({ _id: new ObjectId(contactId) });
 
         if (!currentUser || !contactUser) {
             return res.status(404).json({ success: false, message: 'यूज़र या कॉन्टैक्ट नहीं मिला' });
         }
 
-        const contactIndex = currentUser.contacts.indexOf(contactId);
-        if (contactIndex === -1) {
+        if (!currentUser.contacts.includes(contactId)) {
             return res.status(400).json({ success: false, message: 'यह कॉन्टैक्ट आपके संपर्क में नहीं है' });
         }
 
-        currentUser.contacts.splice(contactIndex, 1);
-        const mutualContactIndex = contactUser.contacts.indexOf(userId);
-        if (mutualContactIndex !== -1) {
-            contactUser.contacts.splice(mutualContactIndex, 1);
-        }
-
-        const chatIndex = chats.findIndex(chat => 
-            chat.participants && 
-            chat.participants.length === 2 && 
-            chat.participants.includes(userId) && 
-            chat.participants.includes(contactId)
+        // दोनों यूज़र्स से कॉन्टैक्ट हटाएं
+        await usersCollection.updateOne(
+            { _id: new ObjectId(userId) },
+            { $pull: { contacts: contactId } }
         );
-        if (chatIndex !== -1) {
-            const chatId = chats[chatIndex].id;
-            chats.splice(chatIndex, 1);
-            if (messages[chatId]) {
-                delete messages[chatId];
-            }
-        }
 
-        const currentUserChats = chats
-            .filter(c => (c.participants && c.participants.includes(userId)) || (c.isGroup && c.members && c.members.includes(userId)))
-            .map(c => ({ ...c, messages: messages[c.id] || [] }));
+        await usersCollection.updateOne(
+            { _id: new ObjectId(contactId) },
+            { $pull: { contacts: userId } }
+        );
 
-        const contactUserChats = chats
-            .filter(c => (c.participants && c.participants.includes(contactId)) || (c.isGroup && c.members && c.members.includes(contactId)))
-            .map(c => ({ ...c, messages: messages[c.id] || [] }));
+        // चैट डिलीट करें (अगर मौजूद हो)
+        await chatsCollection.deleteOne({
+            isGroup: false,
+            participants: { $all: [userId, contactId], $size: 2 }
+        });
+
+        const currentUserChats = await getChatsForUser(userId);
+        const contactUserChats = await getChatsForUser(contactId);
 
         const currentUserSocket = connectedUsers.get(userId);
         if (currentUserSocket) {
@@ -443,56 +492,57 @@ app.post('/removeContact', (req, res) => {
 
         res.json({ success: true, message: 'कॉन्टैक्ट सफलतापूर्वक हटाया गया' });
     } catch (error) {
-        console.error('Error in removeContact:', error);
+        console.error('कॉन्टैक्ट हटाने में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.post('/addStatus', upload.single('file'), (req, res) => {
+// स्टेटस जोड़ने का एंडपॉइंट
+app.post('/addStatus', upload.single('file'), async (req, res) => {
     try {
         const { userId, text } = req.body;
-        if (userId) {
-            let media = req.file ? `http://localhost:3000/uploads/${req.file.filename}` : null;
-            const user = Array.from(usersDb.values()).find(u => u.userId === userId);
-            const username = user ? user.username : 'अज्ञात';
-            const newStatus = { 
-                id: statuses.length + 1, 
-                userId, 
-                username, 
-                profilePic: user ? user.profilePic : '/placeholder.png',
-                text: text || '', 
-                media, 
-                timestamp: Date.now() 
-            };
-            statuses.push(newStatus);
-
-            connectedUsers.forEach((socketId, connectedUserId) => {
-                const connectedUser = Array.from(usersDb.values()).find(u => u.userId === connectedUserId);
-                if (connectedUser) {
-                    const isMutualContact = (connectedUser.contacts.includes(userId) && user.contacts.includes(connectedUserId)) || connectedUserId === userId;
-                    if (isMutualContact) {
-                        const visibleStatuses = statuses.filter(status => 
-                            status.userId === connectedUserId || 
-                            (connectedUser.contacts.includes(status.userId) && Array.from(usersDb.values()).find(u => u.userId === status.userId)?.contacts.includes(connectedUserId))
-                        );
-                        io.to(socketId).emit('statusList', visibleStatuses);
-                    }
-                }
-            });
-
-            res.json({ success: true, status: newStatus });
-        } else {
-            res.status(400).json({ success: false, message: 'यूज़र ID ज़रूरी है' });
+        if (!userId) {
+            return res.status(400).json({ success: false, message: 'यूज़र ID ज़रूरी है' });
         }
+
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'यूज़र नहीं मिला' });
+        }
+
+        const media = req.file ? `https://chatzap.xyz/uploads/${req.file.filename}` : null;
+        const newStatus = {
+            userId,
+            username: user.username,
+            profilePic: user.profilePic,
+            text: text || '',
+            media,
+            timestamp: new Date()
+        };
+
+        await statusesCollection.insertOne(newStatus);
+
+        // सभी कनेक्टेड यूज़र्स को अपडेटेड स्टेटस लिस्ट भेजें
+        const visibleStatuses = await statusesCollection.find({
+            $or: [
+                { userId },
+                { userId: { $in: user.contacts } }
+            ]
+        }).sort({ timestamp: -1 }).toArray();
+
+        io.emit('statusList', visibleStatuses);
+
+        res.json({ success: true, status: newStatus });
     } catch (error) {
-        console.error('Error in addStatus:', error);
+        console.error('स्टेटस जोड़ने में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.get('/getPoll/:pollId', (req, res) => {
+// पोल प्राप्त करने का एंडपॉइंट
+app.get('/getPoll/:pollId', async (req, res) => {
     try {
-        const poll = polls[req.params.pollId];
+        const poll = await pollsCollection.findOne({ _id: new ObjectId(req.params.pollId) });
         if (!poll) {
             return res.status(404).json({ success: false, message: 'पोल नहीं मिला' });
         }
@@ -506,10 +556,11 @@ app.get('/getPoll/:pollId', (req, res) => {
     }
 });
 
-app.get('/getProfile', (req, res) => {
+// प्रोफाइल प्राप्त करने का एंडपॉइंट
+app.get('/getProfile', async (req, res) => {
     try {
         const userId = req.query.userId;
-        const user = Array.from(usersDb.values()).find(u => u.userId === userId);
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
         if (user) {
             const profile = {
                 username: user.username,
@@ -523,97 +574,98 @@ app.get('/getProfile', (req, res) => {
             res.status(404).json({ success: false, message: 'यूज़र नहीं मिला' });
         }
     } catch (error) {
-        console.error('Error in getProfile:', error);
+        console.error('प्रोफाइल प्राप्त करने में त्रुटि:', error);
         res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
     }
 });
 
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
-});
-
+// सॉकेट इवेंट हैंडलर्स
 io.on('connection', (socket) => {
     console.log('नया क्लाइंट कनेक्ट हुआ:', socket.id);
     
-    socket.on('register', (userId) => {
+    socket.on('register', async (userId) => {
         try {
             connectedUsers.set(userId, socket.id);
             socket.userId = userId;
             
-            const user = Array.from(usersDb.values()).find(u => u.userId === userId);
+            const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
             if (user) {
-                const visibleStatuses = statuses.filter(status => 
-                    status.userId === userId || 
-                    (user.contacts.includes(status.userId) && Array.from(usersDb.values()).find(u => u.userId === status.userId)?.contacts.includes(userId))
-                );
-                const userChats = chats.filter(c => 
-                    c.participants?.includes(userId) || 
-                    (c.isGroup && c.members?.includes(userId))
-                ).map(c => ({ ...c, messages: messages[c.id] || [] }));
+                const visibleStatuses = await statusesCollection.find({
+                    $or: [
+                        { userId },
+                        { userId: { $in: user.contacts } }
+                    ]
+                }).sort({ timestamp: -1 }).toArray();
+
+                const userChats = await getChatsForUser(userId);
+                
                 socket.emit('chatList', userChats);
                 socket.emit('statusList', visibleStatuses);
             }
         } catch (error) {
-            console.error('Error in socket register:', error);
+            console.error('सॉकेट रजिस्टर में त्रुटि:', error);
             socket.emit('error', { message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
         }
     });
 
-    socket.on('loadChat', (chatId) => {
+    socket.on('loadChat', async (chatId) => {
         try {
-            const chatMessages = messages[chatId] || [];
+            const chatMessages = await messagesCollection.find({ chatId }).sort({ timestamp: 1 }).toArray();
             socket.emit('chatMessages', { chatId, messages: chatMessages });
         } catch (error) {
-            console.error('Error in loadChat:', error);
+            console.error('चैट लोड करने में त्रुटि:', error);
             socket.emit('error', { message: 'चैट लोड करने में त्रुटि' });
         }
     });
 
-    socket.on('sendMessage', ({ chatId, text, sender, receiverId, media, voice, messageId }) => {
+    socket.on('sendMessage', async ({ chatId, text, sender, receiverId, media, voice, messageId }) => {
         try {
-            if (processedMessages.has(messageId)) return;
-            processedMessages.add(messageId);
-        
-            const chat = chats.find(c => c.id === chatId);
+            const existingMessage = await messagesCollection.findOne({ id: messageId });
+            if (existingMessage) return;
+
+            const chat = await chatsCollection.findOne({ _id: new ObjectId(chatId) });
             if (!chat) {
-                console.error('Chat not found for chatId:', chatId);
+                console.error('चैट नहीं मिली:', chatId);
                 return;
             }
-        
+
             const participants = chat.isGroup ? chat.members : chat.participants;
             if (!participants || !participants.includes(sender)) {
-                console.error('Sender not in chat:', sender, chatId, 'Participants:', participants);
+                console.error('भेजने वाला चैट में नहीं है:', sender, chatId, 'प्रतिभागी:', participants);
                 return;
             }
-        
-            const senderUser = Array.from(usersDb.values()).find(u => u.userId === sender);
+
+            const senderUser = await usersCollection.findOne({ _id: new ObjectId(sender) });
             const username = senderUser ? senderUser.username : 'अज्ञात';
-        
+
             const newMessage = { 
                 id: messageId, 
+                chatId,
                 sender, 
                 username,
                 text: text || '', 
                 media, 
                 voice, 
-                timestamp: Date.now(), 
+                timestamp: new Date(), 
                 readBy: [],
                 status: 'sent',
                 reactions: {}
             };
-        
-            if (!messages[chatId]) messages[chatId] = [];
-            messages[chatId].push(newMessage);
-            chat.lastMessage = text || (media ? 'मीडिया' : (voice ? 'वॉइस मैसेज' : ''));
-        
+
+            await messagesCollection.insertOne(newMessage);
+            
+            await chatsCollection.updateOne(
+                { _id: new ObjectId(chatId) },
+                { $set: { lastMessage: text || (media ? 'मीडिया' : (voice ? 'वॉइस मैसेज' : '')) } }
+            );
+
             if (chat.isGroup) {
-                chat.members?.forEach(member => { // यहाँ टाइपो ठीक किया गया (for MarlboroughEach → forEach)
+                for (const member of chat.members) {
                     const memberSocket = connectedUsers.get(member);
                     if (memberSocket) {
                         io.to(memberSocket).emit('newMessage', { chatId, message: newMessage });
                     }
-                });
+                }
             } else {
                 const receiverSocket = connectedUsers.get(receiverId);
                 if (receiverSocket) {
@@ -624,341 +676,337 @@ io.on('connection', (socket) => {
                     io.to(senderSocket).emit('newMessage', { chatId, message: newMessage });
                 }
             }
-        
-            const updatedChats = chats.filter(c => 
-                (c.participants && (c.participants.includes(sender) || c.participants.includes(receiverId))) || 
-                (c.isGroup && c.members?.includes(sender))
-            ).map(c => ({ ...c, messages: messages[c.id] || [] }));
-        
-            if (chat.isGroup) {
-                chat.members?.forEach(member => {
-                    const memberSocket = connectedUsers.get(member);
-                    if (memberSocket) {
-                        const memberChats = chats.filter(c => 
-                            (c.participants && c.participants.includes(member)) || 
-                            (c.isGroup && c.members?.includes(member))
-                        ).map(c => ({ ...c, messages: messages[c.id] || [] }));
-                        io.to(memberSocket).emit('chatList', memberChats);
-                    }
-                });
-            } else {
-                const senderSocket = connectedUsers.get(sender);
-                if (senderSocket) {
-                    const senderChats = chats.filter(c => 
-                        (c.participants && c.participants.includes(sender)) || 
-                        (c.isGroup && c.members?.includes(sender))
-                    ).map(c => ({ ...c, messages: messages[c.id] || [] }));
-                    io.to(senderSocket).emit('chatList', senderChats);
-                }
-                const receiverSocket = connectedUsers.get(receiverId);
-                if (receiverSocket) {
-                    const receiverChats = chats.filter(c => 
-                        (c.participants && c.participants.includes(receiverId)) || 
-                        (c.isGroup && c.members?.includes(receiverId))
-                    ).map(c => ({ ...c, messages: messages[c.id] || [] }));
-                    io.to(receiverSocket).emit('chatList', receiverChats);
-                }
-            }
+
+            const updatedChats = await getChatsForUser(sender);
+            io.emit('chatList', updatedChats);
         } catch (error) {
-            console.error('Error in sendMessage:', error);
+            console.error('मैसेज भेजने में त्रुटि:', error);
             socket.emit('error', { message: 'मैसेज भेजने में त्रुटि' });
         }
     });
 
-    socket.on('markMessagesAsRead', ({ chatId, userId }) => {
+    socket.on('markMessagesAsRead', async ({ chatId, userId }) => {
         try {
-            const chat = chats.find(c => c.id === chatId);
-            if (!chat || !messages[chatId]) return;
-    
-            const updatedMessages = messages[chatId].map(msg => {
-                if (msg && typeof msg === 'object' && msg.sender !== undefined) {
-                    if (msg.sender !== userId && !msg.readBy?.includes(userId)) {
-                        const updatedReadBy = [...(msg.readBy || []), userId];
-                        let updatedStatus = msg.status;
-                        if (chat.isGroup) {
-                            const eligibleMembers = chat.members ? chat.members.filter(m => m !== msg.sender) : [];
-                            if (eligibleMembers.length > 0 && updatedReadBy.length === eligibleMembers.length) {
-                                updatedStatus = 'read';
-                            } else {
-                                updatedStatus = 'delivered';
-                            }
-                        } else {
-                            updatedStatus = 'read';
-                        }
-                        return { ...msg, readBy: updatedReadBy, status: updatedStatus };
+            const chat = await chatsCollection.findOne({ _id: new ObjectId(chatId) });
+            if (!chat) return;
+
+            // अपडेट करें कि कौन से मैसेज पढ़े गए हैं
+            await messagesCollection.updateMany(
+                { 
+                    chatId, 
+                    sender: { $ne: userId },
+                    readBy: { $ne: userId }
+                },
+                { 
+                    $addToSet: { readBy: userId },
+                    $set: { 
+                        status: chat.isGroup ? 'delivered' : 'read' 
+                    } 
+                }
+            );
+
+            // ग्रुप चैट के लिए, अगर सभी ने पढ़ लिया है तो स्टेटस अपडेट करें
+            if (chat.isGroup) {
+                const messagesToUpdate = await messagesCollection.find({
+                    chatId,
+                    sender: { $ne: userId },
+                    status: { $ne: 'read' }
+                }).toArray();
+
+                for (const msg of messagesToUpdate) {
+                    const eligibleMembers = chat.members.filter(m => m !== msg.sender);
+                    if (msg.readBy && msg.readBy.length === eligibleMembers.length) {
+                        await messagesCollection.updateOne(
+                            { _id: msg._id },
+                            { $set: { status: 'read' } }
+                        );
                     }
                 }
-                return msg;
-            });
-    
-            messages[chatId] = updatedMessages;
-    
-            const participants = chat.isGroup ? (chat.members || []) : (chat.participants || []);
-            participants.forEach(member => {
-                const memberSocket = connectedUsers.get(member);
-                if (memberSocket) {
-                    io.to(memberSocket).emit('chatMessages', { chatId, messages: updatedMessages });
+            }
+
+            const updatedMessages = await messagesCollection.find({ chatId }).sort({ timestamp: 1 }).toArray();
+            
+            const participants = chat.isGroup ? chat.members : chat.participants;
+            for (const participant of participants) {
+                const participantSocket = connectedUsers.get(participant);
+                if (participantSocket) {
+                    io.to(participantSocket).emit('chatMessages', { chatId, messages: updatedMessages });
                 }
-            });
-    
-            const updatedChats = chats.map(c => ({
-                ...c,
-                messages: messages[c.id] || []
-            }));
+            }
+
+            const updatedChats = await getChatsForUser(userId);
             io.emit('chatList', updatedChats);
-            console.log('Messages marked as read for chatId:', chatId, 'Updated Messages:', updatedMessages);
         } catch (error) {
-            console.error('Messages marking as read failed:', error);
+            console.error('मैसेज पढ़े गए चिह्नित करने में त्रुटि:', error);
             socket.emit('markReadError', { message: 'मैसेज को पढ़ा गया के रूप में चिह्नित करने में त्रुटि' });
         }
     });
 
-    socket.on('deleteMessage', ({ chatId, messageId, userId }) => {
+    socket.on('deleteMessage', async ({ chatId, messageId, userId }) => {
         try {
-            const chat = chats.find(c => c.id === chatId);
-            if (!chat || !messages[chatId]) return;
+            const chat = await chatsCollection.findOne({ _id: new ObjectId(chatId) });
+            if (!chat) return;
 
-            const messageIndex = messages[chatId].findIndex(m => m.id === messageId && m.sender === userId);
-            if (messageIndex !== -1) {
-                messages[chatId].splice(messageIndex, 1);
-                if (chat.isGroup) {
-                    chat.members?.forEach(member => {
-                        const memberSocket = connectedUsers.get(member);
-                        if (memberSocket) io.to(memberSocket).emit('messageDeleted', { chatId, messageId });
-                    });
-                } else {
-                    chat.participants?.forEach(participant => {
-                        const participantSocket = connectedUsers.get(participant);
-                        if (participantSocket) io.to(participantSocket).emit('messageDeleted', { chatId, messageId });
-                    });
+            const message = await messagesCollection.findOne({ id: messageId, sender: userId });
+            if (!message) return;
+
+            await messagesCollection.deleteOne({ id: messageId });
+
+            if (chat.isGroup) {
+                for (const member of chat.members) {
+                    const memberSocket = connectedUsers.get(member);
+                    if (memberSocket) io.to(memberSocket).emit('messageDeleted', { chatId, messageId });
+                }
+            } else {
+                for (const participant of chat.participants) {
+                    const participantSocket = connectedUsers.get(participant);
+                    if (participantSocket) io.to(participantSocket).emit('messageDeleted', { chatId, messageId });
                 }
             }
         } catch (error) {
-            console.error('Error in deleteMessage:', error);
+            console.error('मैसेज हटाने में त्रुटि:', error);
             socket.emit('error', { message: 'मैसेज हटाने में त्रुटि' });
         }
     });
 
-    socket.on('addReaction', ({ chatId, messageId, emoji, userId }) => {
+    socket.on('addReaction', async ({ chatId, messageId, emoji, userId }) => {
         try {
-            const chat = chats.find(c => c.id === chatId);
-            if (!chat || !messages[chatId]) return;
-    
-            const message = messages[chatId].find(m => m.id === messageId);
-            if (message) {
-                if (!message.reactions) message.reactions = {};
-                message.reactions[userId] = emoji;
-    
-                if (chat.isGroup) {
-                    chat.members?.forEach(member => {
-                        const memberSocket = connectedUsers.get(member);
-                        if (memberSocket) {
-                            io.to(memberSocket).emit('reactionAdded', { chatId, messageId, userId, emoji });
-                        }
-                    });
-                } else {
-                    chat.participants?.forEach(participant => {
-                        const participantSocket = connectedUsers.get(participant);
-                        if (participantSocket) {
-                            io.to(participantSocket).emit('reactionAdded', { chatId, messageId, userId, emoji });
-                        }
-                    });
+            const chat = await chatsCollection.findOne({ _id: new ObjectId(chatId) });
+            if (!chat) return;
+
+            await messagesCollection.updateOne(
+                { id: messageId },
+                { $set: { [`reactions.${userId}`]: emoji } }
+            );
+
+            if (chat.isGroup) {
+                for (const member of chat.members) {
+                    const memberSocket = connectedUsers.get(member);
+                    if (memberSocket) {
+                        io.to(memberSocket).emit('reactionAdded', { chatId, messageId, userId, emoji });
+                    }
+                }
+            } else {
+                for (const participant of chat.participants) {
+                    const participantSocket = connectedUsers.get(participant);
+                    if (participantSocket) {
+                        io.to(participantSocket).emit('reactionAdded', { chatId, messageId, userId, emoji });
+                    }
                 }
             }
         } catch (error) {
-            console.error('Error in addReaction:', error);
+            console.error('रिएक्शन जोड़ने में त्रुटि:', error);
             socket.emit('error', { message: 'रिएक्शन जोड़ने में त्रुटि' });
         }
     });
 
-    socket.on('deleteStatus', ({ statusId, userId }) => {
+    socket.on('deleteStatus', async ({ statusId, userId }) => {
         try {
-            const statusIndex = statuses.findIndex(s => s.id === statusId && s.userId === userId);
-            if (statusIndex !== -1) {
-                statuses.splice(statusIndex, 1);
+            const result = await statusesCollection.deleteOne({ _id: new ObjectId(statusId), userId });
+            if (result.deletedCount > 0) {
                 io.emit('statusDeleted', { statusId });
-                connectedUsers.forEach((socketId, connectedUserId) => {
-                    const connectedUser = Array.from(usersDb.values()).find(u => u.userId === connectedUserId);
-                    if (connectedUser) {
-                        const visibleStatuses = statuses.filter(status => 
-                            status.userId === connectedUserId || 
-                            (connectedUser.contacts.includes(status.userId) && Array.from(usersDb.values()).find(u => u.userId === status.userId)?.contacts.includes(connectedUserId))
-                        );
-                        io.to(socketId).emit('statusList', visibleStatuses);
-                    }
-                });
+
+                const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+                if (user) {
+                    const visibleStatuses = await statusesCollection.find({
+                        $or: [
+                            { userId },
+                            { userId: { $in: user.contacts } }
+                        ]
+                    }).sort({ timestamp: -1 }).toArray();
+
+                    io.emit('statusList', visibleStatuses);
+                }
             }
         } catch (error) {
-            console.error('Error in deleteStatus:', error);
+            console.error('स्टेटस हटाने में त्रुटि:', error);
             socket.emit('error', { message: 'स्टेटस हटाने में त्रुटि' });
         }
     });
 
-    socket.on('createPoll', ({ chatId, question, options, sender }) => {
+    socket.on('createPoll', async ({ chatId, question, options, sender }) => {
         try {
-            const chat = chats.find(c => c.id === chatId);
+            const chat = await chatsCollection.findOne({ _id: new ObjectId(chatId) });
             if (!chat) return;
-    
+
             if (!question || !Array.isArray(options) || options.length < 2) {
                 socket.emit('pollError', { message: 'प्रश्न और कम से कम 2 विकल्प ज़रूरी हैं' });
                 return;
             }
-    
-            let isDuplicate = false;
-            for (let pollId in polls) {
-                const existingPoll = polls[pollId];
-                if (existingPoll.chatId === chatId && existingPoll.question === question && existingPoll.sender === sender) {
-                    isDuplicate = true;
-                    break;
-                }
-            }
-    
-            if (isDuplicate) {
-                console.log('डुप्लिकेट पोल रोका गया:', question);
+
+            const existingPoll = await pollsCollection.findOne({
+                chatId,
+                question,
+                sender
+            });
+
+            if (existingPoll) {
                 socket.emit('pollError', { message: 'यह पोल पहले से मौजूद है!' });
                 return;
             }
-    
-            const pollId = `${chatId}-${Date.now()}`;
-            const poll = { 
-                id: pollId, 
-                chatId, 
-                question, 
-                options, 
-                votes: options.map(() => []), 
-                sender, 
-                timestamp: Date.now() 
+
+            const pollId = new ObjectId();
+            const poll = {
+                _id: pollId,
+                chatId,
+                question,
+                options,
+                votes: options.map(() => []),
+                sender,
+                timestamp: new Date()
             };
-            polls[pollId] = poll;
-            console.log(`पोल बनाया गया: ${pollId}, डेटा:`, poll);
-    
-            const messageId = `${chatId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            const senderUser = Array.from(usersDb.values()).find(u => u.userId === sender);
+
+            await pollsCollection.insertOne(poll);
+
+            const senderUser = await usersCollection.findOne({ _id: new ObjectId(sender) });
             const username = senderUser ? senderUser.username : 'अज्ञात';
-            const newMessage = { 
-                id: messageId, 
-                sender, 
-                username, 
-                text: '', 
-                media: null, 
-                voice: null, 
-                poll: pollId, 
-                timestamp: Date.now(), 
+
+            const messageId = `${chatId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            const newMessage = {
+                id: messageId,
+                chatId,
+                sender,
+                username,
+                text: '',
+                media: null,
+                voice: null,
+                poll: pollId.toString(),
+                timestamp: new Date(),
                 status: 'sent',
                 readBy: [],
                 reactions: {}
             };
-    
-            if (!messages[chatId]) messages[chatId] = [];
-            messages[chatId].push(newMessage);
-            chat.lastMessage = `पोल: ${question}`;
-    
+
+            await messagesCollection.insertOne(newMessage);
+            
+            await chatsCollection.updateOne(
+                { _id: new ObjectId(chatId) },
+                { $set: { lastMessage: `पोल: ${question}` } }
+            );
+
             if (chat.isGroup) {
-                chat.members?.forEach(member => {
+                for (const member of chat.members) {
                     const memberSocket = connectedUsers.get(member);
                     if (memberSocket) {
                         io.to(memberSocket).emit('newPoll', poll);
                     }
-                });
+                }
             } else {
-                chat.participants?.forEach(participant => {
+                for (const participant of chat.participants) {
                     const participantSocket = connectedUsers.get(participant);
                     if (participantSocket) {
                         io.to(participantSocket).emit('newPoll', poll);
                     }
-                });
+                }
             }
-    
-            const updatedChats = chats.map(c => ({ ...c, messages: messages[c.id] || [] }));
+
+            const updatedChats = await getChatsForUser(sender);
             io.emit('chatList', updatedChats);
         } catch (error) {
-            console.error('Error in createPoll:', error);
+            console.error('पोल बनाने में त्रुटि:', error);
             socket.emit('pollError', { message: 'पोल बनाने में त्रुटि' });
         }
     });
 
-    socket.on('votePoll', ({ chatId, pollId, optionIndex, userId }) => {
+    socket.on('votePoll', async ({ chatId, pollId, optionIndex, userId }) => {
         try {
-            console.log('वोट प्राप्त हुआ:', { chatId, pollId, optionIndex, userId });
-            const poll = polls[pollId];
-            if (!poll || optionIndex < 0 || optionIndex >= poll.options.length || poll.votes[optionIndex].includes(userId)) {
-                console.warn('अमान्य वोट:', { pollId, optionIndex, userId });
-                socket.emit('pollError', { message: 'अमान्य वोट या आप पहले ही वोट कर चुके हैं' });
+            const poll = await pollsCollection.findOne({ _id: new ObjectId(pollId) });
+            if (!poll || optionIndex < 0 || optionIndex >= poll.options.length) {
+                socket.emit('pollError', { message: 'अमान्य पोल या विकल्प' });
                 return;
             }
-    
-            poll.votes[optionIndex].push(userId);
-            console.log('वोट सफलतापूर्वक अपडेट हुआ:', poll);
-    
-            const chat = chats.find(c => c.id === chatId);
+
+            // चेक करें कि यूज़र ने पहले ही वोट तो नहीं कर दिया
+            const hasVoted = poll.votes.some(voteArray => voteArray.includes(userId));
+            if (hasVoted) {
+                socket.emit('pollError', { message: 'आप पहले ही वोट कर चुके हैं' });
+                return;
+            }
+
+            // वोट जोड़ें
+            const updatedVotes = [...poll.votes];
+            updatedVotes[optionIndex] = [...updatedVotes[optionIndex], userId];
+
+            await pollsCollection.updateOne(
+                { _id: new ObjectId(pollId) },
+                { $set: { votes: updatedVotes } }
+            );
+
+            const updatedPoll = { ...poll, votes: updatedVotes };
+
+            const chat = await chatsCollection.findOne({ _id: new ObjectId(chatId) });
             if (chat) {
-                const updatedPoll = { ...poll };
                 if (chat.isGroup) {
-                    chat.members?.forEach(member => {
+                    for (const member of chat.members) {
                         const memberSocket = connectedUsers.get(member);
                         if (memberSocket) {
                             io.to(memberSocket).emit('pollVote', updatedPoll);
                         }
-                    });
+                    }
                 } else {
-                    chat.participants?.forEach(participant => {
+                    for (const participant of chat.participants) {
                         const participantSocket = connectedUsers.get(participant);
                         if (participantSocket) {
                             io.to(participantSocket).emit('pollVote', updatedPoll);
                         }
-                    });
+                    }
                 }
             }
         } catch (error) {
-            console.error('Error in votePoll:', error);
+            console.error('वोट करने में त्रुटि:', error);
             socket.emit('pollError', { message: 'वोट करने में त्रुटि' });
         }
     });
 
-    socket.on('deletePoll', ({ chatId, pollId, userId }) => {
+    socket.on('deletePoll', async ({ chatId, pollId, userId }) => {
         try {
-            const poll = polls[pollId];
+            const poll = await pollsCollection.findOne({ _id: new ObjectId(pollId) });
             if (!poll || poll.sender !== userId) {
                 socket.emit('pollDeleteError', { message: 'पोल नहीं मिला या आप इसका मालिक नहीं हैं' });
                 return;
             }
-    
-            delete polls[pollId];
-    
-            if (messages[chatId]) {
-                const messageIndex = messages[chatId].findIndex(m => m.poll === pollId);
-                if (messageIndex !== -1) {
-                    const deletedMessageId = messages[chatId][messageIndex].id;
-                    messages[chatId].splice(messageIndex, 1);
-    
-                    const chat = chats.find(c => c.id === chatId);
-                    if (chat) {
-                        chat.lastMessage = messages[chatId].length > 0
-                            ? messages[chatId][messages[chatId].length - 1].text || 
-                              (messages[chatId][messages[chatId].length - 1].media ? 'मीडिया' : 'कोई मैसेज नहीं')
-                            : 'कोई मैसेज नहीं';
+
+            // पोल डिलीट करें
+            await pollsCollection.deleteOne({ _id: new ObjectId(pollId) });
+
+            // पोल मैसेज डिलीट करें
+            const message = await messagesCollection.findOne({ poll: pollId.toString() });
+            if (message) {
+                await messagesCollection.deleteOne({ _id: message._id });
+
+                // चैट का लास्ट मैसेज अपडेट करें
+                const lastMessage = await messagesCollection.findOne(
+                    { chatId },
+                    { sort: { timestamp: -1 } }
+                );
+
+                await chatsCollection.updateOne(
+                    { _id: new ObjectId(chatId) },
+                    { 
+                        $set: { 
+                            lastMessage: lastMessage 
+                                ? lastMessage.text || (lastMessage.media ? 'मीडिया' : 'वॉइस मैसेज') 
+                                : 'कोई मैसेज नहीं' 
+                        } 
                     }
-    
-                    const chatToNotify = chats.find(c => c.id === chatId);
-                    if (chatToNotify) {
-                        if (chatToNotify.isGroup) {
-                            chatToNotify.members?.forEach(member => {
-                                const memberSocket = connectedUsers.get(member);
-                                if (memberSocket) io.to(memberSocket).emit('messageDeleted', { chatId, messageId: deletedMessageId });
-                            });
-                        } else {
-                            chatToNotify.participants?.forEach(participant => {
-                                const participantSocket = connectedUsers.get(participant);
-                                if (participantSocket) io.to(participantSocket).emit('messageDeleted', { chatId, messageId: deletedMessageId });
-                            });
+                );
+
+                // सभी को नोटिफाई करें
+                const chat = await chatsCollection.findOne({ _id: new ObjectId(chatId) });
+                if (chat) {
+                    const participants = chat.isGroup ? chat.members : chat.participants;
+                    for (const participant of participants) {
+                        const participantSocket = connectedUsers.get(participant);
+                        if (participantSocket) {
+                            io.to(participantSocket).emit('messageDeleted', { chatId, messageId: message.id });
                         }
                     }
                 }
             }
-    
-            const updatedChats = chats.map(c => ({ ...c, messages: messages[c.id] || [] }));
+
+            const updatedChats = await getChatsForUser(userId);
             io.emit('chatList', updatedChats);
-    
+
             io.emit('pollDeleted', { pollId, chatId });
         } catch (error) {
             console.error('पोल हटाने में त्रुटि:', error);
@@ -971,7 +1019,7 @@ io.on('connection', (socket) => {
             const duration = disappearingMessages[chatId]?.duration || 0;
             socket.emit('disappearingSettings', { chatId, duration });
         } catch (error) {
-            console.error('Error in getDisappearingSettings:', error);
+            console.error('डिसअपीयरिंग सेटिंग्स प्राप्त करने में त्रुटि:', error);
             socket.emit('error', { message: 'डिसअपीयरिंग सेटिंग्स प्राप्त करने में त्रुटि' });
         }
     });
@@ -979,44 +1027,29 @@ io.on('connection', (socket) => {
     socket.on('setDisappearingMessages', ({ chatId, duration }) => {
         try {
             disappearingMessages[chatId] = { duration };
-            const chat = chats.find(c => c.id === chatId);
+            const chat = chatsCollection.findOne({ _id: new ObjectId(chatId) });
             if (chat) {
                 if (chat.isGroup) {
-                    chat.members?.forEach(member => {
+                    chat.members.forEach(member => {
                         const memberSocket = connectedUsers.get(member);
                         if (memberSocket) io.to(memberSocket).emit('disappearingMessagesSet', { chatId, duration });
                     });
                 } else {
-                    chat.participants?.forEach(participant => {
+                    chat.participants.forEach(participant => {
                         const participantSocket = connectedUsers.get(participant);
                         if (participantSocket) io.to(participantSocket).emit('disappearingMessagesSet', { chatId, duration });
                     });
                 }
-
-                if (duration > 0 && messages[chatId]) {
-                    const now = Date.now();
-                    messages[chatId].forEach(msg => {
-                        const timeLeft = duration - (now - msg.timestamp);
-                        if (timeLeft > 0) {
-                            setTimeout(() => {
-                                if (messages[chatId]) {
-                                    io.emit('messageDeleted', { chatId, messageId: msg.id });
-                                    messages[chatId] = messages[chatId].filter(m => m.id !== msg.id);
-                                }
-                            }, timeLeft);
-                        }
-                    });
-                }
             }
         } catch (error) {
-            console.error('Error in setDisappearingMessages:', error);
+            console.error('डिसअपीयरिंग मैसेज सेट करने में त्रुटि:', error);
             socket.emit('error', { message: 'डिसअपीयरिंग मैसेज सेट करने में त्रुटि' });
         }
     });
 
     socket.on('call-user', ({ receiverId, offer, callType }) => {
         try {
-            console.log(`Call initiated from ${socket.userId} to ${receiverId} with type ${callType}`);
+            console.log(`कॉल शुरू हुई ${socket.userId} से ${receiverId} को, प्रकार: ${callType}`);
             const receiverSocket = connectedUsers.get(receiverId);
             if (receiverSocket) {
                 io.to(receiverSocket).emit('call-received', {
@@ -1024,54 +1057,54 @@ io.on('connection', (socket) => {
                     offer,
                     callType
                 });
-                console.log(`Call event sent to ${receiverId}`);
+                console.log(`कॉल इवेंट भेजा गया ${receiverId} को`);
             } else {
-                console.log(`Receiver ${receiverId} not connected`);
+                console.log(`रिसीवर ${receiverId} कनेक्टेड नहीं है`);
             }
         } catch (error) {
-            console.error('Error in call-user:', error);
+            console.error('कॉल शुरू करने में त्रुटि:', error);
             socket.emit('error', { message: 'कॉल शुरू करने में त्रुटि' });
         }
     });
 
     socket.on('call-accepted', ({ callerId, answer }) => {
         try {
-            console.log(`Call accepted by ${socket.userId} for caller ${callerId}`);
+            console.log(`कॉल स्वीकार की गई ${socket.userId} ने, कॉलर: ${callerId}`);
             const callerSocket = connectedUsers.get(callerId);
             if (callerSocket) {
                 io.to(callerSocket).emit('call-accepted', { answer });
-                console.log(`Call accepted event sent to ${callerId}`);
+                console.log(`कॉल स्वीकृति इवेंट भेजा गया ${callerId} को`);
             }
         } catch (error) {
-            console.error('Error in call-accepted:', error);
+            console.error('कॉल स्वीकार करने में त्रुटि:', error);
             socket.emit('error', { message: 'कॉल स्वीकार करने में त्रुटि' });
         }
     });
 
     socket.on('ice-candidate', ({ receiverId, candidate }) => {
         try {
-            console.log(`ICE candidate from ${socket.userId} to ${receiverId}`);
+            console.log(`ICE कैंडिडेट प्राप्त हुआ ${socket.userId} से ${receiverId} को`);
             const receiverSocket = connectedUsers.get(receiverId);
             if (receiverSocket) {
                 io.to(receiverSocket).emit('ice-candidate', { candidate });
-                console.log(`ICE candidate sent to ${receiverId}`);
+                console.log(`ICE कैंडिडेट भेजा गया ${receiverId} को`);
             }
         } catch (error) {
-            console.error('Error in ice-candidate:', error);
+            console.error('ICE कैंडिडेट भेजने में त्रुटि:', error);
             socket.emit('error', { message: 'ICE कैंडिडेट भेजने में त्रुटि' });
         }
     });
 
     socket.on('end-call', ({ receiverId }) => {
         try {
-            console.log(`Call ended by ${socket.userId} to ${receiverId}`);
+            console.log(`कॉल समाप्त हुई ${socket.userId} द्वारा, रिसीवर: ${receiverId}`);
             const receiverSocket = connectedUsers.get(receiverId);
             if (receiverSocket) {
                 io.to(receiverSocket).emit('call-ended');
-                console.log(`Call ended event sent to ${receiverId}`);
+                console.log(`कॉल समाप्ति इवेंट भेजा गया ${receiverId} को`);
             }
         } catch (error) {
-            console.error('Error in end-call:', error);
+            console.error('कॉल समाप्त करने में त्रुटि:', error);
             socket.emit('error', { message: 'कॉल समाप्त करने में त्रुटि' });
         }
     });
@@ -1085,9 +1118,40 @@ io.on('connection', (socket) => {
                 }
             });
         } catch (error) {
-            console.error('Error in disconnect:', error);
+            console.error('डिस्कनेक्ट में त्रुटि:', error);
         }
     });
 });
 
+// हेल्पर फंक्शन: यूज़र के चैट्स प्राप्त करने के लिए
+async function getChatsForUser(userId) {
+    try {
+        const chats = await chatsCollection.find({
+            $or: [
+                { participants: userId },
+                { isGroup: true, members: userId }
+            ]
+        }).toArray();
+
+        const chatsWithMessages = await Promise.all(chats.map(async chat => {
+            const chatMessages = await messagesCollection.find({ chatId: chat._id.toString() })
+                .sort({ timestamp: 1 })
+                .toArray();
+            return { ...chat, id: chat._id.toString(), messages: chatMessages };
+        }));
+
+        return chatsWithMessages;
+    } catch (error) {
+        console.error('चैट्स प्राप्त करने में त्रुटि:', error);
+        return [];
+    }
+}
+
+// एरर हैंडलिंग मिडलवेयर
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ success: false, message: 'सर्वर त्रुटि, कृपया फिर से कोशिश करें' });
+});
+
+// सर्वर स्टार्ट करें
 server.listen(3000, () => console.log('सर्वर पोर्ट 3000 पर चल रहा है'));
